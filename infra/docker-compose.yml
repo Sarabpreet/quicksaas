@@ -1,0 +1,192 @@
+services:
+  # 1. Primary PostgreSQL 16 Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: quicksaas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-quicksaas}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quicksaas-net
+
+  # 2. Redis Cache & Queue Broker
+  redis:
+    image: redis:7-alpine
+    container_name: quicksaas-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quicksaas-net
+
+  # 3. S3-Compatible Object Storage (MinIO)
+  minio:
+    image: minio/minio:latest
+    container_name: quicksaas-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - quicksaas-net
+
+  # 4. S3 Bucket Provisioner (One-shot setup)
+  minio-init:
+    image: minio/mc:latest
+    container_name: quicksaas-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb --ignore-existing local/quicksaas-files;
+      /usr/bin/mc mb --ignore-existing local/quicksaas-backups;
+      exit 0;
+      "
+    networks:
+      - quicksaas-net
+
+  # 5. QuickSaaS Headless Fastify API
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.backend
+    container_name: quicksaas-backend
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-quicksaas}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-production_secret_key_change_me_12345}
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET: quicksaas-files
+    ports:
+      - "${API_PORT:-4000}:4000"
+    volumes:
+      - storage_data:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quicksaas-net
+
+  # 6. QuickSaaS Background Worker & Recurring Cron Daemon
+  cron:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.cron
+    container_name: quicksaas-cron
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-quicksaas}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-production_secret_key_change_me_12345}
+    depends_on:
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quicksaas-net
+
+  # 7. Operations Admin Portal UI
+  admin:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.admin
+    container_name: quicksaas-admin
+    restart: unless-stopped
+    ports:
+      - "${ADMIN_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - quicksaas-net
+
+  # 8. Customer Workspace Frontend
+  frontend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.frontend
+    container_name: quicksaas-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3001}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - quicksaas-net
+
+  # 9. Unified Caddy Edge Reverse Proxy
+  proxy:
+    image: caddy:2-alpine
+    container_name: quicksaas-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    networks:
+      - quicksaas-net
+
+networks:
+  quicksaas-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  storage_data:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,35 @@
+{
+  "name": "quicksaas-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "backend",
+    "admin",
+    "frontend",
+    "cron",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n \"BACKEND,ADMIN,FRONTEND\" -c \"blue,magenta,cyan\" \"npm run dev -w backend\" \"npm run dev -w admin\" \"npm run dev -w frontend\"",
+    "dev:backend": "npm run dev -w backend",
+    "dev:admin": "npm run dev -w admin",
+    "dev:frontend": "npm run dev -w frontend",
+    "build": "npm run build -w @quicksaas/types && npm run build -w backend && npm run build -w admin && npm run build -w frontend",
+    "test": "npm run test -w backend && npm run test -w admin && npm run test -w frontend && npm run test -w cron",
+    "test:e2e": "playwright test",
+    "worker": "npm run worker -w cron",
+    "cron": "npm run start -w cron",
+    "db:migrate": "npm run db:migrate -w backend",
+    "db:seed": "npm run db:seed -w backend",
+    "db:studio": "npm run db:studio -w backend",
+    "backup": "npm run backup -w backend",
+    "restore": "npm run restore -w backend",
+    "create-saas": "npm run create-saas -w backend --",
+    "admin:reset-password": "npm run admin:reset-password -w backend --"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "concurrently": "^9.1.2"
+  }
+}

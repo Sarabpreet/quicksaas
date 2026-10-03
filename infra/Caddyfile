@@ -1,0 +1,30 @@
+{
+    auto_https off
+}
+
+:80 {
+    # Fastify REST API
+    handle /api/* {
+        reverse_proxy backend:4000
+    }
+
+    # Swagger OpenAPI documentation & health
+    handle /documentation* {
+        reverse_proxy backend:4000
+    }
+    handle /health* {
+        reverse_proxy backend:4000
+    }
+
+    # Admin Operations Portal
+    handle /admin* {
+        reverse_proxy admin:80
+    }
+
+    # Customer Workspace App (Default fallback)
+    handle {
+        reverse_proxy frontend:80
+    }
+
+    encode gzip zstd
+}

@@ -1,0 +1,83 @@
+# Lightweight Docker Compose setup for Local Development Dependencies Only
+# Run this to spin up real PostgreSQL, Redis, and MinIO locally while running
+# `npm run dev` on your host machine.
+#
+# Usage:
+#   docker compose -f infra/docker-compose.deps-only.yml up -d
+#
+# Connect your host app with:
+#   DATABASE_URL=postgres://postgres:postgres@localhost:5432/quicksaas
+#   REDIS_URL=redis://localhost:6379
+#   S3_ENDPOINT=http://localhost:9000
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: quicksaas-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: quicksaas
+    ports:
+      - "5432:5432"
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: quicksaas-dev-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - dev_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: quicksaas-dev-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - dev_minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: quicksaas-dev-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb --ignore-existing local/quicksaas-files;
+      /usr/bin/mc mb --ignore-existing local/quicksaas-backups;
+      exit 0;
+      "
+
+volumes:
+  dev_postgres_data:
+  dev_redis_data:
+  dev_minio_data:

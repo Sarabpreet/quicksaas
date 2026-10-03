@@ -1,0 +1,54 @@
+# Multi-stage Dockerfile for QuickSaaS Background Worker & Scheduler Daemon
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+# Copy root manifest and workspace manifests
+COPY package.json package-lock.json ./
+COPY packages/types/package.json ./packages/types/
+COPY backend/package.json ./backend/
+COPY cron/package.json ./cron/
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY packages/types ./packages/types
+COPY backend ./backend
+COPY cron ./cron
+
+# Build shared types and backend
+RUN npm run build -w @quicksaas/types && npm run build -w backend
+
+# Production runner stage
+FROM node:22-alpine AS runner
+
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Install curl
+RUN apk add --no-cache curl
+
+# Copy manifests
+COPY package.json package-lock.json ./
+COPY packages/types/package.json ./packages/types/
+COPY backend/package.json ./backend/
+COPY cron/package.json ./cron/
+
+# Install dependencies (including tsx for running cron daemon)
+RUN npm ci
+
+# Copy built packages and sources
+COPY --from=builder /app/packages/types/dist ./packages/types/dist
+COPY --from=builder /app/backend/dist ./backend/dist
+COPY --from=builder /app/backend/drizzle ./backend/drizzle
+COPY --from=builder /app/backend/src ./backend/src
+COPY --from=builder /app/cron ./cron
+
+# Permissions
+RUN chown -R node:node /app
+
+USER node
+WORKDIR /app/cron
+
+CMD ["npm", "run", "start"]
