@@ -538,11 +538,29 @@ Located in `e2e/multi-app-journey.spec.ts`. Coordinated live execution across Fa
   - `npm run build`: **0 errors across all 4 packages**.
   - `npm test`: **73/73 tests passing (100%)**.
 
-
-
-
-
-
-
-
-
+### Entry 018 - Compact Terminal Logging & Persistent Project Disk Logs
+- **Compact ANSI Terminal Logger (`backend/src/lib/logger.ts`)**:
+  - Replaced noisy, multi-line (8–12 lines per request) Fastify raw Pino logs with a clean, single-line, color-coded terminal logger.
+  - Color-coded HTTP verbs: Cyan (`GET`), Green (`POST`), Yellow (`PUT`/`PATCH`/4xx warnings), Red (`DELETE`/5xx errors).
+  - Outputs concise execution telemetry: `[HH:MM:SS] METHOD /url STATUS (duration) - actor/error`.
+  - Added test run filter: suppresses request spam during Vitest/Node test execution (`NODE_ENV === "test"`), while keeping genuine runtime warnings and 5xx errors visible.
+  - Attached to Fastify instance lifecycle via `onRequest` and `onResponse` hooks in [`backend/src/server.ts`](../backend/src/server.ts).
+- **Persistent Disk-Based File Logging (`.data/logs/`)**:
+  - Maintained within the project directory structure under `.data/logs/`:
+    - `.data/logs/app.log`: Persistent log of all HTTP traffic, background worker tasks, cron scheduler ticks, and system events.
+    - `.data/logs/error.log`: Dedicated error file capturing 5xx HTTP responses, unhandled exceptions, and background job failures.
+  - Zero-Docker compliant: utilizes pure Node.js asynchronous filesystem streams (`node:fs/promises`) with automatic parent directory creation (`mkdir({ recursive: true })`).
+- **Worker & Scheduler Logging Integration**:
+  - Integrated `logger.info` and `logger.error` into [`cron/worker.ts`](../cron/worker.ts) and [`cron/scheduler.ts`](../cron/scheduler.ts).
+  - Background task executions, retries, and errors write directly to both terminal and `.data/logs/`.
+- **Superadmin Log Inspection API Endpoint**:
+  - Added `GET /api/v1/admin/system/logs` in [`backend/src/modules/admin/admin.routes.ts`](../backend/src/modules/admin/admin.routes.ts).
+  - Guarded by `authenticate` and `requireSuperadmin`.
+  - Supports query parameters `?type=app|error` and `?lines=100` (up to 500) to safely tail disk logs from the Admin Portal or REST client without requiring shell/SSH access.
+- **Log Layer Clarity in QuickSaaS**:
+  1. **Business Audit Trail**: Database-backed in PostgreSQL/PGlite table `audit_logs` (actor, action, resource, tenant, IP, user-agent).
+  2. **Delivery Logs**: Dedicated database tables (`email_logs`, `webhook_deliveries`, `job_records`).
+  3. **Runtime System Logs**: Persistent file-based logs on disk (`.data/logs/app.log`, `.data/logs/error.log`).
+- **Full Verification**:
+  - `npm run build`: **0-error compilation across all 4 monorepo packages**.
+  - `npm test`: **73/73 tests passing (100%)** (`backend` 30, `admin` 21, `frontend` 17, `cron` 5).

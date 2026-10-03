@@ -18,23 +18,16 @@ import { jobRoutes } from "./modules/jobs/jobs.routes.js";
 import { adminRoutes } from "./modules/admin/admin.routes.js";
 import { backupRoutes } from "./modules/admin/backups.routes.js";
 import { billingRoutes } from "./modules/billing/billing.routes.js";
+import { attachCompactLogger, logger } from "./lib/logger.js";
 
 export async function buildServer(): Promise<FastifyInstance> {
   const app = fastify({
-    logger: {
-      level: process.env.NODE_ENV === "production" ? "info" : "debug",
-      transport:
-        process.env.NODE_ENV !== "production"
-          ? {
-              target: "pino-pretty",
-              options: {
-                translateTime: "HH:MM:ss Z",
-                ignore: "pid,hostname",
-              },
-            }
-          : undefined,
-    },
+    logger: false,
+    disableRequestLogging: true,
   });
+
+  // Attach Compact Single-Line Terminal & Persistent File Logger
+  attachCompactLogger(app);
 
   // CORS
   await app.register(cors, {
@@ -76,8 +69,8 @@ export async function buildServer(): Promise<FastifyInstance> {
   });
 
   // Global Error Handler
-  app.setErrorHandler((error: any, _request, reply) => {
-    app.log.error(error);
+  app.setErrorHandler((error: any, request, reply) => {
+    logger.error(`[HTTP 500] ${request.method} ${request.url}: ${error.message}`, error);
     const statusCode = error.statusCode || 500;
     reply.status(statusCode).send({
       statusCode,

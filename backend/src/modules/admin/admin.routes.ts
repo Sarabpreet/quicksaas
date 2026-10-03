@@ -68,4 +68,31 @@ export async function adminRoutes(server: FastifyInstance) {
     });
     return reply.send(userList);
   });
+
+  // Tail system runtime and error logs from disk
+  server.get("/api/v1/admin/system/logs", {
+    schema: {
+      tags: ["Superadmin Operations"],
+      summary: "Tail system runtime and error logs from persistent disk files (Superadmin only)",
+      security: [{ bearerAuth: [] }],
+      querystring: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["app", "error"], default: "app" },
+          lines: { type: "integer", default: 100 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { type = "app", lines = 100 } = request.query as { type?: "app" | "error"; lines?: number };
+    const { logger, LOG_DIR } = await import("../../lib/logger.js");
+    const logLines = await logger.getRecentLogs(type, Math.min(500, Math.max(1, lines)));
+
+    return reply.send({
+      type,
+      logDir: LOG_DIR,
+      totalLines: logLines.length,
+      lines: logLines,
+    });
+  });
 }

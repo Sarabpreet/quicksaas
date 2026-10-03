@@ -12,6 +12,7 @@ import {
 } from "../backend/src/db/schema/index.js";
 import { redis, isRedisReady } from "../backend/src/redis/client.js";
 import { createBackup } from "../backend/src/lib/backup.js";
+import { logger } from "../backend/src/lib/logger.js";
 
 export type JobHandler = (payload: any, job: JobRecord) => Promise<any>;
 
@@ -154,7 +155,6 @@ registerJobHandler("cleanup.expired_invites", async (_payload, _job) => {
  */
 export async function executeJob(job: JobRecord): Promise<JobRecord> {
   const startTime = Date.now();
-  console.log(`[Worker] Starting job: ${job.name} (ID: ${job.id}, Attempt: ${job.attempts + 1}/${job.maxAttempts})`);
 
   // Transition to processing
   await db
@@ -172,7 +172,6 @@ export async function executeJob(job: JobRecord): Promise<JobRecord> {
     if (handler) {
       result = await handler(job.payload, job);
     } else {
-      console.log(`[Worker] Executing default task for '${job.name}'`);
       result = { executed: true, timestamp: new Date().toISOString() };
     }
 
@@ -187,14 +186,14 @@ export async function executeJob(job: JobRecord): Promise<JobRecord> {
       .returning();
 
     const durationMs = Date.now() - startTime;
-    console.log(`[Worker] ✅ Job '${job.name}' completed in ${durationMs}ms`);
+    logger.info(`[Worker] ✅ Job '${job.name}' (ID: ${job.id.slice(0, 8)}) completed in ${durationMs}ms`);
     return completed;
   } catch (err: any) {
     const durationMs = Date.now() - startTime;
     const isExhausted = job.attempts + 1 >= job.maxAttempts;
     const nextStatus = isExhausted ? "failed" : "pending";
 
-    console.error(`[Worker] ❌ Job '${job.name}' failed in ${durationMs}ms:`, err.message);
+    logger.error(`[Worker] ❌ Job '${job.name}' (ID: ${job.id.slice(0, 8)}) failed in ${durationMs}ms: ${err.message}`);
 
     const [failed] = await db
       .update(jobRecords)

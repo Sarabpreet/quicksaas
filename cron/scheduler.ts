@@ -2,6 +2,7 @@ import { eq, and, desc, lte } from "drizzle-orm";
 import { db } from "../backend/src/db/client.js";
 import { jobRecords } from "../backend/src/db/schema/index.js";
 import { redis, isRedisReady } from "../backend/src/redis/client.js";
+import { logger } from "../backend/src/lib/logger.js";
 
 export interface ScheduledTask {
   id: string;
@@ -63,13 +64,13 @@ export async function runSchedulerTick(now = new Date()): Promise<number> {
       now.getTime() - task.lastRunAt.getTime() >= task.intervalMinutes * 60 * 1000;
 
     if (isDue) {
-      console.log(`[Scheduler] ⏰ Triggering scheduled task: '${task.name}' (Interval: ${task.intervalMinutes}m)`);
+      logger.info(`[Scheduler] ⏰ Triggering scheduled task: '${task.name}' (Interval: ${task.intervalMinutes}m)`);
       try {
         await enqueueJob(task.name, task.payload || {}, task.queueName);
         task.lastRunAt = now;
         tasksTriggered++;
       } catch (err: any) {
-        console.error(`[Scheduler] ❌ Failed to enqueue task '${task.name}':`, err.message);
+        logger.error(`[Scheduler] ❌ Failed to enqueue task '${task.name}': ${err.message}`);
       }
     }
   }
